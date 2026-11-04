@@ -105,7 +105,7 @@ for name in ['launcher.js', 'main.js']:
     }
 
     // Let CheerpJ finish the Java work started while analyzing the uploaded JAR.
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await new Promise(resolve => setTimeout(resolve, 250));
     let appId = await state.lastLoader.getAppId();
     if (!appId) {
         await launcherUtil.ensureAppId(state.lastLoader, "DragonBoy252.jar");
@@ -135,7 +135,7 @@ for name in ['launcher.js', 'main.js']:
 async function main() {''', 1)
         text = text.replace('main();', '''main().catch(error => {
     console.error(error);
-    document.getElementById("loading").textContent = "Không tải được giả lập: " + error.message;
+    document.getElementById("loading").textContent = "Không tải được giả lập: " + (error && error.message ? error.message : String(error));
 });''')
     else:
         text = text.replace('function setListeners() {', '''function pointerPosition(point) {
