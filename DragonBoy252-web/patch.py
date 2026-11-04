@@ -104,19 +104,22 @@ for name in ['launcher.js', 'main.js']:
         throw new Error("Không thể mở JAR bằng bộ giả lập.");
     }
 
-    if (!(await state.lastLoader.getAppId())) {
+    // Let CheerpJ finish the Java work started while analyzing the uploaded JAR.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    let appId = await state.lastLoader.getAppId();
+    if (!appId) {
         await launcherUtil.ensureAppId(state.lastLoader, "DragonBoy252.jar");
         if (!state.lastLoader.className) state.lastLoader.className = "main.GameMidlet";
         if (!state.lastLoader.name) state.lastLoader.name = "DragonBoy252";
+        appId = "DragonBoy252_jar";
     }
-    state.currentGame.appId = await state.lastLoader.getAppId();
+    state.currentGame.appId = appId;
     state.currentGame.name = state.lastLoader.name || "DragonBoy252";
 
     readUI(state.currentGame);
     const settings = await kvToJava(state.currentGame.settings);
     const appProperties = await kvToJava(state.currentGame.appProperties);
     const systemProperties = await kvToJava(state.currentGame.systemProperties);
-    const appId = state.currentGame.appId;
     await launcherUtil.initApp(state.currentGame.jarFile, state.lastLoader, settings, appProperties, systemProperties);
     try { localStorage.setItem("dragonboy252.appId", appId); } catch {}
     launchDragonBoy(appId);
