@@ -100,9 +100,17 @@ for name in ['launcher.js', 'main.js']:
     const gameResponse = await fetch("/DragonBoy252.jar", {cache: "no-store"});
     if (!gameResponse.ok) throw new Error("Không tải được DragonBoy252.jar");
     await processGameFile(await gameResponse.arrayBuffer(), "DragonBoy252.jar");
-    if (!state.currentGame || !state.currentGame.appId) {
-        throw new Error("JAR không có thông tin MIDlet hợp lệ.");
+    if (!state.currentGame || !state.lastLoader) {
+        throw new Error("Không thể mở JAR bằng bộ giả lập.");
     }
+
+    if (!(await state.lastLoader.getAppId())) {
+        await launcherUtil.ensureAppId(state.lastLoader, "DragonBoy252.jar");
+        if (!state.lastLoader.className) state.lastLoader.className = "main.GameMidlet";
+        if (!state.lastLoader.name) state.lastLoader.name = "DragonBoy252";
+    }
+    state.currentGame.appId = await state.lastLoader.getAppId();
+    state.currentGame.name = state.lastLoader.name || "DragonBoy252";
 
     readUI(state.currentGame);
     const settings = await kvToJava(state.currentGame.settings);
