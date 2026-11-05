@@ -81,15 +81,15 @@ implements Runnable {
         exception.printStackTrace();
     }
 
-    protected final void pointerDragged(int n2, int n3) {
+    public final void pointerDragged(int n2, int n3) {
         this.a(n2 /= eh.b, n3 /= eh.b);
     }
 
-    protected final void pointerPressed(int n2, int n3) {
+    public final void pointerPressed(int n2, int n3) {
         this.b(n2 /= eh.b, n3 /= eh.b);
     }
 
-    protected final void pointerReleased(int n2, int n3) {
+    public final void pointerReleased(int n2, int n3) {
         this.c(n2 /= eh.b, n3 /= eh.b);
     }
 
