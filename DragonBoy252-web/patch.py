@@ -220,12 +220,82 @@ function toggleScaleMode() {
     autoscale();
 }
 
+function queueTextKey(keyCode, symbol = 0) {
+    const args = [keyCode, symbol, false, false];
+    evtQueue.queueEvent({kind: 'keydown', args});
+    evtQueue.queueEvent({kind: 'keyup', args});
+}
+
+function queueTextCharacter(character) {
+    if (character.length !== 1) return;
+    const symbol = character.charCodeAt(0);
+    if (symbol <= 32 || symbol >= 127) return;
+    const keyCode = /^[A-Za-z]$/.test(character) ? symbol + 256 : (character === '.' ? 190 : symbol);
+    queueTextKey(keyCode, symbol);
+}
+
 function setListeners() {
     let activePointerId = null;
     let lastPointerPosition = {x: 0, y: 0};
+    const textEntryDock = document.getElementById('mobile-text-entry-dock');
+    const textEntry = document.getElementById('mobile-text-entry');
+    const textEntryDone = document.getElementById('mobile-text-entry-done');
+
+    function openMobileTextEntry() {
+        if (!textEntryDock || !textEntry) return;
+        textEntry.value = '';
+        textEntryDock.hidden = false;
+        textEntry.focus({preventScroll: true});
+    }
+
+    function closeMobileTextEntry() {
+        if (!textEntryDock || !textEntry) return;
+        textEntryDock.hidden = true;
+        textEntry.blur();
+        textEntry.value = '';
+        display.focus({preventScroll: true});
+    }
+
+    textEntry?.addEventListener('beforeinput', event => {
+        if ((event.inputType === 'insertText' || event.inputType === 'insertReplacementText' || event.inputType === 'insertFromPaste') && event.data) {
+            for (const character of event.data) queueTextCharacter(character);
+        } else if (event.inputType === 'deleteContentBackward') {
+            queueTextKey(8, 8);
+        } else if (event.inputType === 'deleteContentForward') {
+            queueTextKey(46, 46);
+        }
+    });
+    textEntry?.addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            queueTextKey(13);
+        } else if (event.key === 'ArrowLeft') {
+            queueTextKey(37);
+        } else if (event.key === 'ArrowRight') {
+            queueTextKey(39);
+        } else if (event.key === 'Backspace' && !textEntry.value) {
+            event.preventDefault();
+            queueTextKey(8, 8);
+        }
+    });
+    textEntryDone?.addEventListener('click', closeMobileTextEntry);
 
     setKbdHandler((isDown, key) => {
+        if (key === 'TextEntry') {
+            if (isDown) openMobileTextEntry();
+            return;
+        }
         if (isDown) display.focus({preventScroll: true});
+        if (key === 'At' || key === 'Period') {
+            const symbol = key === 'At' ? '@' : '.';
+            keyRepeatManager.post(isDown, key, {
+                symbol: symbol.charCodeAt(0),
+                keyCode: key === 'At' ? 64 : 190,
+                ctrlKey: false,
+                shiftKey: false
+            });
+            return;
+        }
         const symbols = {Period: '.', At: '@', Backspace: '\\b', Space: ' '};
         const symbol = key.startsWith('Digit') ? key.substring(5) : (symbols[key] || '');
         keyRepeatManager.post(isDown, key, {
@@ -236,10 +306,21 @@ function setListeners() {
     });
 
     function handleKeyEvent(event) {
+        if (event.key === '@') {
+            keyRepeatManager.post(event.type === 'keydown', 'At', {
+                symbol: 64,
+                keyCode: 64,
+                ctrlKey: event.ctrlKey,
+                shiftKey: event.shiftKey
+            });
+            event.preventDefault();
+            return;
+        }
         if (!codeMap[event.code]) return;
         const isDown = event.type === 'keydown';
         keyRepeatManager.post(isDown, event.code, {
             symbol: event.key.length === 1 ? event.key.charCodeAt(0) : 0,
+            keyCode: /^[A-Za-z]$/.test(event.key) ? event.key.charCodeAt(0) + 256 : codeMap[event.code],
             ctrlKey: event.ctrlKey,
             shiftKey: event.shiftKey
         });
@@ -250,14 +331,15 @@ function setListeners() {
     display.addEventListener('keyup', handleKeyEvent);
 
     keyRepeatManager.register((kind, key, args) => {
-        if (kind === 'click' && (key === 'Fullscreen' || key === 'Maximize')) {
-            toggleFullscreen();
-        } else if (kind === 'click' && key === 'ScaleMode') {
-            toggleScaleMode();
-        } else if (codeMap[key]) {
+        if (kind === 'click') {
+            if (key === 'Fullscreen' || key === 'Maximize') toggleFullscreen();
+            else if (key === 'ScaleMode') toggleScaleMode();
+            return;
+        }
+        if (codeMap[key]) {
             evtQueue.queueEvent({
                 kind: kind === 'up' ? 'keyup' : 'keydown',
-                args: [codeMap[key], args.symbol, args.ctrlKey, args.shiftKey]
+                args: [args.keyCode ?? codeMap[key], args.symbol, args.ctrlKey, args.shiftKey]
             });
         }
     });
@@ -318,6 +400,48 @@ function setListeners() {
         assert "pointercancel" in text and "scale-mode" in text and "navigator.maxTouchPoints" in text
     script.write_text(text, encoding='utf-8')
 
+# Keep queued events available immediately and never return an empty queue item
+# when a resolved promise is left over from a burst of key events.
+event_queue = upstream/'web/src/eventqueue.js'
+text = event_queue.read_text(encoding='utf-8')
+old_wait = '''    async waitForEvent() {
+        this.started = true;
+        if (this.queue.length > 1) {
+            return this.queue.shift();
+        }
+
+        await this.promise;
+        this.refreshPromise(); // refresh here
+        return this.queue.shift();
+    }'''
+new_wait = '''    async waitForEvent() {
+        this.started = true;
+        while (this.queue.length === 0) {
+            await this.promise;
+            this.refreshPromise();
+        }
+        return this.queue.shift();
+    }'''
+assert old_wait in text
+text = text.replace(old_wait, new_wait)
+assert 'while (this.queue.length === 0)' in text
+event_queue.write_text(text, encoding='utf-8')
+
+# Keep letter key codes distinct from numpad keys, which overlap at 97–105.
+mobile_source = upstream/'src/org/recompile/mobile/Mobile.java'
+text = mobile_source.read_text(encoding='utf-8')
+mobile_start = text.index('public static int getMobileKey(int keycode)')
+body_start = text.index('{', mobile_start) + 1
+text = text[:body_start] + '''
+		if ((keycode >= 321 && keycode <= 346) || (keycode >= 353 && keycode <= 378)) return keycode - 256;
+		if (keycode == KeyEvent.VK_BACK_SPACE) return 8;
+		if (keycode == 190) return Mobile.KEY_NUM1;
+'''+text[body_start:]
+mobile_method = text[mobile_start:]
+assert mobile_method.index('keycode >= 321 && keycode <= 346') < mobile_method.index('if (nokia || sonyEricsson)')
+assert 'keycode == KeyEvent.VK_BACK_SPACE' in mobile_method and 'keycode == 190' in mobile_method
+mobile_source.write_text(text, encoding='utf-8')
+
 # The emulator page is the user's entry point, so brand and size that page itself.
 run_page = upstream/'web/run.html'
 text = run_page.read_text(encoding='utf-8')
@@ -328,8 +452,10 @@ text = text.replace('<div id="loading">Loading...</div>', '<div id="loading">Đa
 text = text.replace('''            <button data-key="NumpadDivide" class="key">#</button>''', '''            <button data-key="NumpadDivide" class="key">#</button>
             <button data-key="At" class="key" aria-label="Dấu @">@</button>
             <button data-key="Period" class="key" aria-label="Dấu chấm">.</button>
-            <button data-key="Backspace" class="key" aria-label="Xóa ký tự">⌫</button>''')
+            <button data-key="Backspace" class="key" aria-label="Xóa ký tự">⌫</button>
+            <button data-key="TextEntry" class="key" aria-label="Mở bàn phím chữ">ABC</button>''')
 text = text.replace('<button data-key="Maximize" class="key small-key small-key-right" aria-label="Maximize">⛶</button>', '<button data-key="Fullscreen" class="key small-key small-key-right" aria-label="Toàn màn hình">⛶</button>')
+text = text.replace('<button data-key="Escape" class="key small-key small-key-left">Esc</button>', '<button data-key="Escape" class="key small-key small-key-left" aria-label="Cài đặt giả lập">⚙</button>')
 
 toolbar = '''<body>
     <header id="game-toolbar" aria-label="Điều khiển game">
@@ -340,13 +466,18 @@ toolbar = '''<body>
             <button id="help-toggle" type="button" aria-expanded="false" aria-controls="game-help">Điều khiển</button>
         </div>
     </header>
+    <div id="mobile-text-entry-dock" role="group" aria-label="Bàn phím chữ" hidden>
+        <input id="mobile-text-entry" type="text" aria-label="Nhập chữ vào game" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done">
+        <button id="mobile-text-entry-done" type="button">Xong</button>
+    </div>
     <section id="game-help" role="dialog" aria-modal="true" aria-labelledby="help-title" hidden>
         <div class="help-card">
             <button id="help-close" type="button" aria-label="Đóng hướng dẫn">Đóng</button>
             <h1 id="help-title">Điều khiển</h1>
-            <p><b>Di chuyển:</b> phím mũi tên hoặc WASD. Nhấn Enter để chọn, Esc để quay lại.</p>
-            <p><b>Thao tác trong game:</b> F1 / F2 hoặc L / R. Có thể chạm hay nhấn trực tiếp lên màn hình game.</p>
-            <p><b>Nhập liệu trên điện thoại:</b> bàn phím số ở dưới có thêm @, dấu chấm và phím xóa.</p>
+            <p><b>Di chuyển:</b> phím mũi tên hoặc 2/4/6/8. Nhấn Enter hoặc 5 để chọn.</p>
+            <p><b>Thao tác trong game:</b> F1 / F2; bàn phím ảo dùng L / R. Có thể chạm hay nhấn trực tiếp lên màn hình game.</p>
+            <p><b>Cài đặt giả lập:</b> nhấn Esc hoặc biểu tượng ⚙ trên bàn phím ảo.</p>
+            <p><b>Nhập liệu trên điện thoại:</b> bàn phím số nhập số; nút ABC mở bàn phím chữ của điện thoại để nhập email, mật khẩu, tên và văn bản.</p>
         </div>
     </section>'''
 text = text.replace('<body>', toolbar, 1)
@@ -360,8 +491,8 @@ responsive_css = '''
         --safe-right: env(safe-area-inset-right, 0px);
         --safe-bottom: env(safe-area-inset-bottom, 0px);
         --safe-left: env(safe-area-inset-left, 0px);
-        --keypad-h: clamp(150px, 30dvh, 220px);
-        --side-key-w: clamp(104px, 19vw, 156px);
+        --keypad-h: clamp(180px, 39dvh, 260px);
+        --side-key-w: clamp(120px, 19vw, 156px);
     }
     html, body { width: 100%; height: 100%; height: 100dvh; overflow: hidden; overscroll-behavior: none; }
     body { background: #111; color: #f5f5f5; font-family: system-ui, sans-serif; }
@@ -378,13 +509,17 @@ responsive_css = '''
         background: #292929; color: inherit; font: inherit; cursor: pointer; touch-action: manipulation;
     }
     #game-toolbar button:hover, #game-toolbar button:focus-visible, #game-help button:focus-visible { background: #414141; outline: 2px solid #f6ca55; outline-offset: 1px; }
+    #mobile-text-entry-dock { position: fixed; z-index: 15; inset: calc(var(--safe-top) + var(--toolbar-h) + 4px) max(6px, var(--safe-right)) auto max(6px, var(--safe-left)); display: flex; gap: 6px; padding: 6px; border: 1px solid #555; border-radius: 8px; background: #202020; }
+    #mobile-text-entry-dock[hidden] { display: none; }
+    #mobile-text-entry { flex: 1; min-width: 0; height: 40px; box-sizing: border-box; border: 1px solid #777; border-radius: 6px; padding: 4px 8px; background: #fff; color: #111; font: 16px system-ui, sans-serif; -webkit-text-security: disc; text-security: disc; }
+    #mobile-text-entry-done { min-height: 40px; border: 1px solid #565656; border-radius: 6px; padding: 4px 12px; background: #333; color: #fff; font: 14px system-ui, sans-serif; }
     #screen-area { position: fixed; display: block; inset: calc(var(--safe-top) + var(--toolbar-h)) var(--safe-right) var(--safe-bottom) var(--safe-left); overflow: hidden; background: #080808; }
     #display { position: absolute; left: 50%; top: 50%; margin: 0; transform: translate(-50%, -50%); display: block; max-width: none; max-height: none; touch-action: none; -webkit-user-select: none; user-select: none; }
     #display:focus-visible { outline: 2px solid #f6ca55; }
     #loading { color: #fff; font: 600 16px system-ui, sans-serif; text-align: center; }
     .keypad-part { z-index: 5; padding: 6px; background: #181818; touch-action: none; }
     .key-grid { gap: clamp(2px, .7vw, 6px); }
-    .left-grid { grid-template-rows: repeat(5, 1fr); }
+    .left-grid { grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(4, 1fr); }
     .key { min-width: 0; min-height: 0; padding: 0; border-radius: 8px; font-size: clamp(13px, 3.3vmin, 22px); touch-action: none; -webkit-user-select: none; user-select: none; }
     .key.active { background: #796022; border-color: #f6ca55; }
     .arrow-key { font-size: clamp(18px, 5vmin, 30px); }
@@ -401,6 +536,7 @@ responsive_css = '''
     }
     body.kbd-landscape #left-keys { left: var(--safe-left); }
     body.kbd-landscape #right-keys { right: var(--safe-right); }
+    body.kbd-landscape .left-grid { grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(6, 1fr); }
     body.kbd-landscape #screen-area { left: calc(var(--side-key-w) + var(--safe-left)); right: calc(var(--side-key-w) + var(--safe-right)); }
     #game-help[hidden] { display: none; }
     #game-help { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 18px; background: #000b; }
@@ -422,12 +558,13 @@ responsive_css = '''
         .small-key { width: 90%; height: 90%; min-height: 25px; }
     }
     @media (max-width: 480px) and (orientation: landscape) {
-        :root { --side-key-w: 84px; }
+        :root { --side-key-w: 140px; }
     }
 </style>
 '''
 text = text.replace('<body>', responsive_css + '<body>', 1)
-assert '<header id="game-toolbar"' in text and 'viewport-fit=cover' in text and 'data-key="At"' in text
+assert '<header id="game-toolbar"' in text and 'viewport-fit=cover' in text
+assert 'data-key="At"' in text and 'data-key="TextEntry"' in text and 'id="mobile-text-entry"' in text
 run_page.write_text(text, encoding='utf-8')
 
 # Pointer events work for touch, stylus, trackpad, and mouse; key counts keep
