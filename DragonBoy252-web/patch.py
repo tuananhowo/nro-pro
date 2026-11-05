@@ -241,6 +241,9 @@ function setListeners() {
     const textEntry = document.getElementById('mobile-text-entry');
     const textEntryVisibility = document.getElementById('mobile-text-entry-visibility');
     const textEntryDone = document.getElementById('mobile-text-entry-done');
+    const textEntryToggle = document.getElementById('keyboard-entry-toggle');
+    let textEntryComposing = false;
+    let committedComposition = null;
 
     function setTextEntryMasked(masked) {
         if (!textEntry || !textEntryVisibility) return;
@@ -250,8 +253,17 @@ function setListeners() {
         textEntryVisibility.setAttribute('aria-label', masked ? 'Hiện ký tự đã nhập' : 'Che ký tự đã nhập');
     }
 
+    function flushCommittedComposition() {
+        const composition = committedComposition;
+        if (!composition) return;
+        clearTimeout(composition.timer);
+        committedComposition = null;
+        for (const character of composition.value) queueTextCharacter(character);
+    }
+
     function openMobileTextEntry() {
         if (!textEntryDock || !textEntry) return;
+        flushCommittedComposition();
         textEntry.value = '';
         setTextEntryMasked(true);
         textEntryDock.hidden = false;
@@ -260,6 +272,7 @@ function setListeners() {
 
     function closeMobileTextEntry() {
         if (!textEntryDock || !textEntry) return;
+        flushCommittedComposition();
         textEntryDock.hidden = true;
         textEntry.blur();
         textEntry.value = '';
@@ -268,21 +281,49 @@ function setListeners() {
     }
 
     textEntry?.addEventListener('beforeinput', event => {
-        if ((event.inputType === 'insertText' || event.inputType === 'insertReplacementText' || event.inputType === 'insertFromPaste') && event.data) {
-            for (const character of event.data) queueTextCharacter(character);
+        if (event.inputType === 'insertCompositionText' || textEntryComposing) return;
+        if ((event.inputType === 'insertText' || event.inputType === 'insertReplacementText' || event.inputType === 'insertFromPaste' || event.inputType === 'insertFromComposition') && (event.data || event.dataTransfer)) {
+            const value = event.data || event.dataTransfer.getData('text/plain');
+            if (committedComposition) {
+                const compositionValue = committedComposition.value;
+                flushCommittedComposition();
+                if (value === compositionValue) return;
+            }
+            for (const character of value) queueTextCharacter(character);
         } else if (event.inputType === 'deleteContentBackward') {
             queueTextKey(8, 8);
         } else if (event.inputType === 'deleteContentForward') {
             queueTextKey(46, 46);
         }
     });
+    textEntry?.addEventListener('compositionstart', () => {
+        flushCommittedComposition();
+        textEntryComposing = true;
+        committedComposition = null;
+    });
+    textEntry?.addEventListener('compositionend', event => {
+        textEntryComposing = false;
+        if (!event.data) return;
+        const composition = {value: event.data, timer: null};
+        committedComposition = composition;
+        composition.timer = setTimeout(() => {
+            if (committedComposition !== composition) return;
+            for (const character of composition.value) queueTextCharacter(character);
+            committedComposition = null;
+        }, 250);
+    });
     textEntry?.addEventListener('keydown', event => {
         if (event.key === 'Enter') {
+            if (event.isComposing || textEntryComposing) return;
             event.preventDefault();
+            flushCommittedComposition();
             queueTextKey(13);
+            closeMobileTextEntry();
         } else if (event.key === 'ArrowLeft') {
+            event.preventDefault();
             queueTextKey(37);
         } else if (event.key === 'ArrowRight') {
+            event.preventDefault();
             queueTextKey(39);
         } else if (event.key === 'Backspace' && !textEntry.value) {
             event.preventDefault();
@@ -295,6 +336,7 @@ function setListeners() {
         textEntry.focus({preventScroll: true});
     });
     textEntryDone?.addEventListener('click', closeMobileTextEntry);
+    textEntryToggle?.addEventListener('click', openMobileTextEntry);
 
     setKbdHandler((isDown, key) => {
         if (key === 'TextEntry') {
@@ -322,6 +364,9 @@ function setListeners() {
     });
 
     function handleKeyEvent(event) {
+        const target = event.target;
+        if (target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.closest('#game-help'))) return;
+        if (event.ctrlKey || event.metaKey || event.altKey) return;
         if (event.key === '@') {
             keyRepeatManager.post(event.type === 'keydown', 'At', {
                 symbol: 64,
@@ -340,11 +385,11 @@ function setListeners() {
             ctrlKey: event.ctrlKey,
             shiftKey: event.shiftKey
         });
-        if (!event.ctrlKey && !event.metaKey && !event.altKey) event.preventDefault();
+        event.preventDefault();
     }
 
-    display.addEventListener('keydown', handleKeyEvent);
-    display.addEventListener('keyup', handleKeyEvent);
+    document.addEventListener('keydown', handleKeyEvent, true);
+    document.addEventListener('keyup', handleKeyEvent, true);
 
     keyRepeatManager.register((kind, key, args) => {
         if (kind === 'click') {
@@ -450,12 +495,13 @@ mobile_start = text.index('public static int getMobileKey(int keycode)')
 body_start = text.index('{', mobile_start) + 1
 text = text[:body_start] + '''
 		if ((keycode >= 321 && keycode <= 346) || (keycode >= 353 && keycode <= 378)) return keycode - 256;
+		if (keycode == 64) return 64;
 		if (keycode == KeyEvent.VK_BACK_SPACE) return 8;
 		if (keycode == 190) return Mobile.KEY_NUM1;
 '''+text[body_start:]
 mobile_method = text[mobile_start:]
 assert mobile_method.index('keycode >= 321 && keycode <= 346') < mobile_method.index('if (nokia || sonyEricsson)')
-assert 'keycode == KeyEvent.VK_BACK_SPACE' in mobile_method and 'keycode == 190' in mobile_method
+assert 'keycode == KeyEvent.VK_BACK_SPACE' in mobile_method and 'keycode == 190' in mobile_method and 'keycode == 64' in mobile_method
 mobile_source.write_text(text, encoding='utf-8')
 
 # The mobile text-entry dock forwards characters through J2ME TextBox. Accept
@@ -486,6 +532,7 @@ toolbar = '''<body>
         <a class="brand" href="/" aria-label="DragonBoy252">DragonBoy252</a>
         <div class="toolbar-actions">
             <button id="scale-mode" type="button" aria-pressed="true" title="Chuyển chế độ hiển thị">Vừa màn hình</button>
+            <button id="keyboard-entry-toggle" type="button" aria-label="Mở bàn phím chữ" title="Mở bàn phím chữ">ABC</button>
             <button id="fullscreen-toggle" type="button" aria-label="Toàn màn hình">⛶ <span>Toàn màn hình</span></button>
             <button id="help-toggle" type="button" aria-expanded="false" aria-controls="game-help">Điều khiển</button>
         </div>
@@ -592,7 +639,9 @@ responsive_css = '''
 text = text.replace('<body>', responsive_css + '<body>', 1)
 assert '<header id="game-toolbar"' in text and 'viewport-fit=cover' in text
 assert 'data-key="At"' in text and 'data-key="TextEntry"' in text and 'id="mobile-text-entry"' in text
-assert 'id="mobile-text-entry-visibility"' in text
+assert 'id="mobile-text-entry-visibility"' in text and 'id="keyboard-entry-toggle"' in text
+assert "document.addEventListener('keydown', handleKeyEvent, true)" in listeners
+assert "addEventListener('compositionend'" in listeners
 assert 'setTextEntryMasked' in listeners
 run_page.write_text(text, encoding='utf-8')
 
