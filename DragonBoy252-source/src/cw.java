@@ -3900,12 +3900,7 @@ lbl386:
                 } else {
                     this.fb = co3;
                     if (!(main.a.G.a && main.a.G.F() || !co3.bt)) {
-                        try {
-                            co3.d(eh2);
-                        }
-                        catch (NullPointerException nullPointerException) {
-                            cw.a("character-shadow", n7, nullPointerException);
-                        }
+                        co3.d(eh2);
                     }
                 }
             }
@@ -3944,12 +3939,7 @@ lbl386:
                     cw.a("character", n7);
                 } else if (!main.a.G.a || !main.a.G.F()) {
                     this.fb = co4;
-                    try {
-                        co4.a(eh2);
-                    }
-                    catch (NullPointerException nullPointerException) {
-                        cw.a("character", n7, nullPointerException);
-                    }
+                    co4.a(eh2);
                 }
             }
             ++n7;
@@ -3981,13 +3971,8 @@ lbl386:
                     this.fb = co5;
                     if (co5.cG != null && co5.F() != null && co5.cw < co5.F().length) {
                         this.fb = co5;
-                        try {
-                            co5.e(eh2);
-                            co5.c(eh2);
-                        }
-                        catch (NullPointerException nullPointerException) {
-                            cw.a("character-skill", n7, nullPointerException);
-                        }
+                        co5.e(eh2);
+                        co5.c(eh2);
                     }
                 }
             }
