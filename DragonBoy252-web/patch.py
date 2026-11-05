@@ -239,11 +239,21 @@ function setListeners() {
     let lastPointerPosition = {x: 0, y: 0};
     const textEntryDock = document.getElementById('mobile-text-entry-dock');
     const textEntry = document.getElementById('mobile-text-entry');
+    const textEntryVisibility = document.getElementById('mobile-text-entry-visibility');
     const textEntryDone = document.getElementById('mobile-text-entry-done');
+
+    function setTextEntryMasked(masked) {
+        if (!textEntry || !textEntryVisibility) return;
+        textEntry.classList.toggle('is-masked', masked);
+        textEntryVisibility.textContent = masked ? 'Hiện' : 'Ẩn';
+        textEntryVisibility.setAttribute('aria-pressed', String(!masked));
+        textEntryVisibility.setAttribute('aria-label', masked ? 'Hiện ký tự đã nhập' : 'Che ký tự đã nhập');
+    }
 
     function openMobileTextEntry() {
         if (!textEntryDock || !textEntry) return;
         textEntry.value = '';
+        setTextEntryMasked(true);
         textEntryDock.hidden = false;
         textEntry.focus({preventScroll: true});
     }
@@ -253,6 +263,7 @@ function setListeners() {
         textEntryDock.hidden = true;
         textEntry.blur();
         textEntry.value = '';
+        setTextEntryMasked(true);
         display.focus({preventScroll: true});
     }
 
@@ -277,6 +288,11 @@ function setListeners() {
             event.preventDefault();
             queueTextKey(8, 8);
         }
+    });
+    textEntryVisibility?.addEventListener('click', event => {
+        event.preventDefault();
+        setTextEntryMasked(!textEntry.classList.contains('is-masked'));
+        textEntry.focus({preventScroll: true});
     });
     textEntryDone?.addEventListener('click', closeMobileTextEntry);
 
@@ -468,6 +484,7 @@ toolbar = '''<body>
     </header>
     <div id="mobile-text-entry-dock" role="group" aria-label="Bàn phím chữ" hidden>
         <input id="mobile-text-entry" type="text" aria-label="Nhập chữ vào game" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done">
+        <button id="mobile-text-entry-visibility" type="button" aria-label="Hiện ký tự đã nhập" aria-pressed="false">Hiện</button>
         <button id="mobile-text-entry-done" type="button">Xong</button>
     </div>
     <section id="game-help" role="dialog" aria-modal="true" aria-labelledby="help-title" hidden>
@@ -477,7 +494,7 @@ toolbar = '''<body>
             <p><b>Di chuyển:</b> phím mũi tên hoặc 2/4/6/8. Nhấn Enter hoặc 5 để chọn.</p>
             <p><b>Thao tác trong game:</b> F1 / F2; bàn phím ảo dùng L / R. Có thể chạm hay nhấn trực tiếp lên màn hình game.</p>
             <p><b>Cài đặt giả lập:</b> nhấn Esc hoặc biểu tượng ⚙ trên bàn phím ảo.</p>
-            <p><b>Nhập liệu trên điện thoại:</b> bàn phím số nhập số; nút ABC mở bàn phím chữ của điện thoại để nhập email, mật khẩu, tên và văn bản.</p>
+            <p><b>Nhập liệu trên điện thoại:</b> bàn phím số nhập số; nút ABC mở bàn phím chữ của điện thoại. Ký tự được che mặc định; bấm Hiện để kiểm tra email, tên hoặc nội dung đã nhập.</p>
         </div>
     </section>'''
 text = text.replace('<body>', toolbar, 1)
@@ -511,7 +528,9 @@ responsive_css = '''
     #game-toolbar button:hover, #game-toolbar button:focus-visible, #game-help button:focus-visible { background: #414141; outline: 2px solid #f6ca55; outline-offset: 1px; }
     #mobile-text-entry-dock { position: fixed; z-index: 15; inset: calc(var(--safe-top) + var(--toolbar-h) + 4px) max(6px, var(--safe-right)) auto max(6px, var(--safe-left)); display: flex; gap: 6px; padding: 6px; border: 1px solid #555; border-radius: 8px; background: #202020; }
     #mobile-text-entry-dock[hidden] { display: none; }
-    #mobile-text-entry { flex: 1; min-width: 0; height: 40px; box-sizing: border-box; border: 1px solid #777; border-radius: 6px; padding: 4px 8px; background: #fff; color: #111; font: 16px system-ui, sans-serif; -webkit-text-security: disc; text-security: disc; }
+    #mobile-text-entry { flex: 1; min-width: 0; height: 40px; box-sizing: border-box; border: 1px solid #777; border-radius: 6px; padding: 4px 8px; background: #fff; color: #111; font: 16px system-ui, sans-serif; }
+    #mobile-text-entry.is-masked { -webkit-text-security: disc; text-security: disc; }
+    #mobile-text-entry-visibility { min-height: 40px; border: 1px solid #565656; border-radius: 6px; padding: 4px 9px; background: #333; color: #fff; font: 14px system-ui, sans-serif; }
     #mobile-text-entry-done { min-height: 40px; border: 1px solid #565656; border-radius: 6px; padding: 4px 12px; background: #333; color: #fff; font: 14px system-ui, sans-serif; }
     #screen-area { position: fixed; display: block; inset: calc(var(--safe-top) + var(--toolbar-h)) var(--safe-right) var(--safe-bottom) var(--safe-left); overflow: hidden; background: #080808; }
     #display { position: absolute; left: 50%; top: 50%; margin: 0; transform: translate(-50%, -50%); display: block; max-width: none; max-height: none; touch-action: none; -webkit-user-select: none; user-select: none; }
@@ -565,6 +584,8 @@ responsive_css = '''
 text = text.replace('<body>', responsive_css + '<body>', 1)
 assert '<header id="game-toolbar"' in text and 'viewport-fit=cover' in text
 assert 'data-key="At"' in text and 'data-key="TextEntry"' in text and 'id="mobile-text-entry"' in text
+assert 'id="mobile-text-entry-visibility"' in text
+assert 'setTextEntryMasked' in listeners
 run_page.write_text(text, encoding='utf-8')
 
 # Pointer events work for touch, stylus, trackpad, and mouse; key counts keep

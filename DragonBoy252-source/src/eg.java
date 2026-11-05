@@ -18,6 +18,7 @@ public abstract class eg
 extends Canvas
 implements Runnable {
     public static boolean as;
+    private static long lastLoopErrorAt;
 
     public static void a(GameMidlet gameMidlet) {
         Display.getDisplay((MIDlet)gameMidlet).setCurrent((Displayable)a.h);
@@ -70,6 +71,16 @@ implements Runnable {
         return n2 / eh.b + (n2 % eh.b == 0 ? 0 : 1);
     }
 
+    private static void reportLoopError(String phase, RuntimeException exception) {
+        long now = System.currentTimeMillis();
+        if (now - lastLoopErrorAt < 5000L) {
+            return;
+        }
+        lastLoopErrorAt = now;
+        System.err.println("[GAME-LOOP] " + phase + " failed: " + exception);
+        exception.printStackTrace();
+    }
+
     protected final void pointerDragged(int n2, int n3) {
         this.a(n2 /= eh.b, n3 /= eh.b);
     }
@@ -98,9 +109,24 @@ implements Runnable {
         as = true;
         while (as) {
             long l2 = System.currentTimeMillis();
-            this.d();
-            this.repaint();
-            this.serviceRepaints();
+            try {
+                this.d();
+            }
+            catch (RuntimeException runtimeException) {
+                eg.reportLoopError("update", runtimeException);
+            }
+            try {
+                this.repaint();
+            }
+            catch (RuntimeException runtimeException) {
+                eg.reportLoopError("repaint", runtimeException);
+            }
+            try {
+                this.serviceRepaints();
+            }
+            catch (RuntimeException runtimeException) {
+                eg.reportLoopError("paint", runtimeException);
+            }
             long l3 = System.currentTimeMillis() - l2;
             try {
                 if (l3 < 27L) {
