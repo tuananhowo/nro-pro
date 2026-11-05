@@ -4,6 +4,7 @@ DragonBoy252-source/*
 !DragonBoy252-source/src/
 DragonBoy252-source/src/*
 !DragonBoy252-source/src/eg.java
+!DragonBoy252-source/src/cw.java
 DragonBoy252-source.zip
 DragonBoy252.jar
 DragonBoy252-web/node_modules/
