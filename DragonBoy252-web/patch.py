@@ -229,7 +229,7 @@ function queueTextKey(keyCode, symbol = 0) {
 function queueTextCharacter(character) {
     if (character.length !== 1) return;
     const symbol = character.charCodeAt(0);
-    if (symbol <= 32 || symbol >= 127) return;
+    if (symbol < 32 || (symbol >= 127 && symbol <= 159)) return;
     const keyCode = /^[A-Za-z]$/.test(character) ? symbol + 256 : (character === '.' ? 190 : symbol);
     queueTextKey(keyCode, symbol);
 }
@@ -457,6 +457,14 @@ mobile_method = text[mobile_start:]
 assert mobile_method.index('keycode >= 321 && keycode <= 346') < mobile_method.index('if (nokia || sonyEricsson)')
 assert 'keycode == KeyEvent.VK_BACK_SPACE' in mobile_method and 'keycode == 190' in mobile_method
 mobile_source.write_text(text, encoding='utf-8')
+
+# The mobile text-entry dock forwards characters through J2ME TextBox. Accept
+# spaces and Unicode text there, while still rejecting control characters.
+text_box_source = upstream/'src/javax/microedition/lcdui/TextBox.java'
+text = text_box_source.read_text(encoding='utf-8')
+text = text.replace("} else if (e.keyChar > ' ' && e.keyChar  < 0x7f) {", "} else if (!Character.isISOControl(e.keyChar)) {")
+assert "!Character.isISOControl(e.keyChar)" in text
+text_box_source.write_text(text, encoding='utf-8')
 
 # The emulator page is the user's entry point, so brand and size that page itself.
 run_page = upstream/'web/run.html'
