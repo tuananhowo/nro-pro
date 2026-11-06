@@ -52,12 +52,7 @@ public final class PatchGameBytecode {
                     return new MethodVisitor(Opcodes.ASM7, method) {
                         @Override
                         public void visitMethodInsn(int opcode, String owner, String methodName, String methodDescriptor, boolean isInterface) {
-                            if (!"co".equals(owner)
-                                    || !"(Leh;)V".equals(methodDescriptor)
-                                    || !("a".equals(methodName)
-                                    || "c".equals(methodName)
-                                    || "d".equals(methodName)
-                                    || "e".equals(methodName))) {
+                            if (!isGuardedRenderCall(owner, methodName, methodDescriptor)) {
                                 super.visitMethodInsn(opcode, owner, methodName, methodDescriptor, isInterface);
                                 return;
                             }
@@ -79,9 +74,26 @@ public final class PatchGameBytecode {
                 }
             };
             reader.accept(visitor, ClassReader.EXPAND_FRAMES);
-            if (patchedCalls[0] == 0) throw new IllegalStateException("No remote character draw call was found");
+            if (patchedCalls[0] == 0) throw new IllegalStateException("No render call sites were found");
             Files.write(classFile, writer.toByteArray());
-            System.out.println("Patched character draw call sites (methods a/c/d/e): " + patchedCalls[0]);
+            System.out.println("Patched map entity and effect draw call sites: " + patchedCalls[0]);
         }
+    }
+
+    private static boolean isGuardedRenderCall(String owner, String name, String descriptor) {
+        if ("(Leh;)V".equals(descriptor)) {
+            return ("co".equals(owner) && ("a".equals(name) || "c".equals(name) || "d".equals(name) || "e".equals(name)))
+                || ("dh".equals(owner) && "a".equals(name))
+                || ("bg".equals(owner) && ("a".equals(name) || "d".equals(name)))
+                || ("cd".equals(owner) && ("a".equals(name) || "b".equals(name)))
+                || ("as".equals(owner) && "a".equals(name))
+                || ("j".equals(owner) && "a".equals(name))
+                || ("ek".equals(owner) && "a".equals(name))
+                || ("aj".equals(owner) && "a".equals(name))
+                || ("f".equals(owner) && "f".equals(name))
+                || ("h".equals(owner) && ("a".equals(name) || "b".equals(name)))
+                || ("cw".equals(owner) && "b".equals(name));
+        }
+        return "cw".equals(owner) && "a".equals(name) && "(Leh;I)V".equals(descriptor);
     }
 }
