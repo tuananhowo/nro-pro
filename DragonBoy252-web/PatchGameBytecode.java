@@ -52,7 +52,12 @@ public final class PatchGameBytecode {
                     return new MethodVisitor(Opcodes.ASM7, method) {
                         @Override
                         public void visitMethodInsn(int opcode, String owner, String methodName, String methodDescriptor, boolean isInterface) {
-                            if (!"co".equals(owner) || !"a".equals(methodName) || !"(Leh;)V".equals(methodDescriptor)) {
+                            if (!"co".equals(owner)
+                                    || !"(Leh;)V".equals(methodDescriptor)
+                                    || !("a".equals(methodName)
+                                    || "c".equals(methodName)
+                                    || "d".equals(methodName)
+                                    || "e".equals(methodName))) {
                                 super.visitMethodInsn(opcode, owner, methodName, methodDescriptor, isInterface);
                                 return;
                             }
@@ -76,7 +81,7 @@ public final class PatchGameBytecode {
             reader.accept(visitor, ClassReader.EXPAND_FRAMES);
             if (patchedCalls[0] == 0) throw new IllegalStateException("No remote character draw call was found");
             Files.write(classFile, writer.toByteArray());
-            System.out.println("Patched remote character draw calls: " + patchedCalls[0]);
+            System.out.println("Patched character draw call sites (methods a/c/d/e): " + patchedCalls[0]);
         }
     }
 }
