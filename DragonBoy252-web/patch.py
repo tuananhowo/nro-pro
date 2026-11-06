@@ -106,6 +106,29 @@ for name in ['launcher.js', 'main.js']:
     const installed = state.games.find(game => game.appId === savedAppId || game.appId === "DragonBoy252" || game.name === "DragonBoy252");
     if (installed) {
         try { localStorage.setItem("dragonboy252.appId", installed.appId); } catch {}
+        let latestJarEtag = null;
+        try {
+            const versionResponse = await fetch("/DragonBoy252.jar", {method: "HEAD", cache: "no-store"});
+            if (versionResponse.ok) latestJarEtag = versionResponse.headers.get("etag");
+        } catch {}
+        let installedJarEtag = null;
+        try { installedJarEtag = localStorage.getItem("dragonboy252.jarEtag"); } catch {}
+        if (latestJarEtag && latestJarEtag !== installedJarEtag) {
+            try {
+                const updateResponse = await fetch("/DragonBoy252.jar", {cache: "no-store"});
+                if (!updateResponse.ok) throw new Error("Không tải được bản cập nhật game");
+                const jarBuffer = await updateResponse.arrayBuffer();
+                await processGameFile(jarBuffer, "DragonBoy252.jar");
+                const updatedAppId = await state.lastLoader.getAppId();
+                if (updatedAppId !== installed.appId) throw new Error("ID game sau cập nhật không khớp");
+                const File = await lib.java.io.File;
+                const installedJar = await new File("/files/" + installed.appId + "/app.jar");
+                await launcherUtil.copyJar(new Int8Array(jarBuffer), installedJar);
+                localStorage.setItem("dragonboy252.jarEtag", latestJarEtag);
+            } catch (error) {
+                console.warn("Không thể cập nhật JAR đã cài; sẽ mở bản đang lưu.", error);
+            }
+        }
         launchDragonBoy(installed.appId);
         return;
     }
@@ -135,7 +158,11 @@ for name in ['launcher.js', 'main.js']:
     const appProperties = await kvToJava(state.currentGame.appProperties);
     const systemProperties = await kvToJava(state.currentGame.systemProperties);
     await launcherUtil.initApp(state.currentGame.jarFile, state.lastLoader, settings, appProperties, systemProperties);
-    try { localStorage.setItem("dragonboy252.appId", appId); } catch {}
+    try {
+        localStorage.setItem("dragonboy252.appId", appId);
+        const jarEtag = gameResponse.headers.get("etag");
+        if (jarEtag) localStorage.setItem("dragonboy252.jarEtag", jarEtag);
+    } catch {}
     launchDragonBoy(appId);
 }'''
         start = text.index(start_marker)
