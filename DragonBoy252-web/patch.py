@@ -33,6 +33,20 @@ main=upstream/'web/src/main.js'
 text=main.read_text(encoding='utf-8')
 text='import networkNatives from "../libjs/network.js";\n'+text
 text=text.replace('natives: {','natives: {\n            ...networkNatives,',1)
+text=text.replace('const keyRepeatManager = new KeyRepeatManager();', 'const keyRepeatManager = new KeyRepeatManager();\nlet nativeTextEntryActive = false;')
+assert 'let nativeTextEntryActive = false;' in text
+native_input_bridge = '''            async Java_pl_zb3_freej2me_bridge_shell_Shell_setTextInputEnabled(lib, enabled, value, password) {
+                nativeTextEntryActive = Boolean(enabled);
+                if (nativeTextEntryActive && isMobile) {
+                    window.dragonboyOpenTextEntry?.(value || '', Boolean(password));
+                } else if (!nativeTextEntryActive) {
+                    window.dragonboyCloseTextEntry?.();
+                }
+            },
+'''
+native_input_anchor = '            async Java_pl_zb3_freej2me_bridge_shell_Shell_waitForAndDispatchEvents'
+assert native_input_anchor in text
+text = text.replace(native_input_anchor, native_input_bridge + native_input_anchor, 1)
 main.write_text(text,encoding='utf-8')
 # Browser physical punctuation keys were absent, so TextBox never received '.'.
 key_script=upstream/'web/src/key.js'
@@ -261,12 +275,15 @@ function setListeners() {
         for (const character of composition.value) queueTextCharacter(character);
     }
 
-    function openMobileTextEntry() {
+    function openMobileTextEntry(initialValue, password) {
         if (!textEntryDock || !textEntry) return;
         flushCommittedComposition();
-        textEntry.value = '';
-        setTextEntryMasked(true);
+        if (typeof initialValue === 'string') textEntry.value = initialValue;
+        else if (!nativeTextEntryActive) textEntry.value = '';
+        if (typeof password === 'boolean') setTextEntryMasked(password);
+        else if (!nativeTextEntryActive) setTextEntryMasked(false);
         textEntryDock.hidden = false;
+        document.body.classList.add('text-entry-open');
         textEntry.focus({preventScroll: true});
     }
 
@@ -274,11 +291,15 @@ function setListeners() {
         if (!textEntryDock || !textEntry) return;
         flushCommittedComposition();
         textEntryDock.hidden = true;
+        document.body.classList.remove('text-entry-open');
         textEntry.blur();
-        textEntry.value = '';
+        if (!nativeTextEntryActive) textEntry.value = '';
         setTextEntryMasked(true);
         display.focus({preventScroll: true});
     }
+
+    window.dragonboyOpenTextEntry = openMobileTextEntry;
+    window.dragonboyCloseTextEntry = closeMobileTextEntry;
 
     textEntry?.addEventListener('beforeinput', event => {
         if (event.inputType === 'insertCompositionText' || textEntryComposing) return;
@@ -411,6 +432,9 @@ function setListeners() {
         display.focus({preventScroll: true});
         try { display.setPointerCapture(event.pointerId); } catch {}
         lastPointerPosition = pointerPosition(event);
+        if (nativeTextEntryActive && isMobile && lastPointerPosition.y < Math.min(88, display.height * 0.3)) {
+            openMobileTextEntry();
+        }
         evtQueue.queueEvent({kind: 'pointerpressed', ...lastPointerPosition});
         event.preventDefault();
     });
@@ -504,6 +528,31 @@ assert mobile_method.index('keycode >= 321 && keycode <= 346') < mobile_method.i
 assert 'keycode == KeyEvent.VK_BACK_SPACE' in mobile_method and 'keycode == 190' in mobile_method and 'keycode == 64' in mobile_method
 mobile_source.write_text(text, encoding='utf-8')
 
+# Notify the browser when a native MIDP TextBox is shown so mobile browsers can
+# open their on-screen keyboard from the user's touch gesture.
+shell_source = upstream/'src/pl/zb3/freej2me/bridge/shell/Shell.java'
+text = shell_source.read_text(encoding='utf-8')
+text = text.replace('public static native void setCanvasSize(int width, int height);', '''public static native void setCanvasSize(int width, int height);
+    public static native void setTextInputEnabled(boolean enabled, String value, boolean password);''')
+assert 'setTextInputEnabled(boolean enabled, String value, boolean password)' in text
+shell_source.write_text(text, encoding='utf-8')
+
+display_source = upstream/'src/javax/microedition/lcdui/Display.java'
+text = display_source.read_text(encoding='utf-8')
+text = text.replace('import pl.zb3.freej2me.bridge.gles2.GLES2;', '''import pl.zb3.freej2me.bridge.gles2.GLES2;
+import pl.zb3.freej2me.bridge.shell.Shell;''')
+text = text.replace('''				current = next;
+				current.notifySetCurrent();''', '''				current = next;
+				if (next instanceof TextBox) {
+					TextBox box = (TextBox)next;
+					Shell.setTextInputEnabled(true, box.getString(), box.getConstraints() == TextField.PASSWORD);
+				} else {
+					Shell.setTextInputEnabled(false, "", false);
+				}
+				current.notifySetCurrent();''')
+assert 'Shell.setTextInputEnabled(true, box.getString()' in text
+display_source.write_text(text, encoding='utf-8')
+
 # The mobile text-entry dock forwards characters through J2ME TextBox. Accept
 # spaces and Unicode text there, while still rejecting control characters.
 text_box_source = upstream/'src/javax/microedition/lcdui/TextBox.java'
@@ -549,7 +598,7 @@ toolbar = '''<body>
             <p><b>Di chuyển:</b> phím mũi tên hoặc 2/4/6/8. Nhấn Enter hoặc 5 để chọn.</p>
             <p><b>Thao tác trong game:</b> F1 / F2; bàn phím ảo dùng L / R. Có thể chạm hay nhấn trực tiếp lên màn hình game.</p>
             <p><b>Cài đặt giả lập:</b> nhấn Esc hoặc biểu tượng ⚙ trên bàn phím ảo.</p>
-            <p><b>Nhập liệu trên điện thoại:</b> bàn phím số nhập số; nút ABC mở bàn phím chữ của điện thoại. Ký tự được che mặc định; bấm Hiện để kiểm tra email, tên hoặc nội dung đã nhập.</p>
+            <p><b>Nhập liệu trên điện thoại:</b> chạm vào ô nhập trong game hoặc nút ABC để mở bàn phím điện thoại. Ký tự mật khẩu được che; bấm Hiện để kiểm tra nội dung.</p>
         </div>
     </section>'''
 text = text.replace('<body>', toolbar, 1)
@@ -563,7 +612,7 @@ responsive_css = '''
         --safe-right: env(safe-area-inset-right, 0px);
         --safe-bottom: env(safe-area-inset-bottom, 0px);
         --safe-left: env(safe-area-inset-left, 0px);
-        --keypad-h: clamp(180px, 39dvh, 260px);
+        --keypad-h: clamp(190px, 40dvh, 290px);
         --side-key-w: clamp(120px, 19vw, 156px);
     }
     html, body { width: 100%; height: 100%; height: 100dvh; overflow: hidden; overscroll-behavior: none; }
@@ -581,6 +630,7 @@ responsive_css = '''
         background: #292929; color: inherit; font: inherit; cursor: pointer; touch-action: manipulation;
     }
     #game-toolbar button:hover, #game-toolbar button:focus-visible, #game-help button:focus-visible { background: #414141; outline: 2px solid #f6ca55; outline-offset: 1px; }
+    #keyboard-entry-toggle { min-width: 44px; }
     #mobile-text-entry-dock { position: fixed; z-index: 15; inset: calc(var(--safe-top) + var(--toolbar-h) + 4px) max(6px, var(--safe-right)) auto max(6px, var(--safe-left)); display: flex; gap: 6px; padding: 6px; border: 1px solid #555; border-radius: 8px; background: #202020; }
     #mobile-text-entry-dock[hidden] { display: none; }
     #mobile-text-entry { flex: 1; min-width: 0; height: 40px; box-sizing: border-box; border: 1px solid #777; border-radius: 6px; padding: 4px 8px; background: #fff; color: #111; font: 16px system-ui, sans-serif; }
@@ -598,11 +648,13 @@ responsive_css = '''
     .key.active { background: #796022; border-color: #f6ca55; }
     .arrow-key { font-size: clamp(18px, 5vmin, 30px); }
     .small-key { min-height: 30px; font-size: 13px; }
+    body.text-entry-open #left-keys, body.text-entry-open #right-keys { display: none !important; }
+    body.text-entry-open #screen-area { bottom: var(--safe-bottom) !important; }
     body.kbd-portrait #left-keys, body.kbd-portrait #right-keys {
-        display: flex; top: auto; bottom: var(--safe-bottom); width: 50%; height: var(--keypad-h);
+        display: flex; top: auto; bottom: var(--safe-bottom); height: var(--keypad-h);
     }
-    body.kbd-portrait #left-keys { left: var(--safe-left); }
-    body.kbd-portrait #right-keys { right: var(--safe-right); }
+    body.kbd-portrait #left-keys { left: var(--safe-left); width: 54%; }
+    body.kbd-portrait #right-keys { right: var(--safe-right); width: 46%; }
     body.kbd-portrait #screen-area { bottom: calc(var(--keypad-h) + var(--safe-bottom)); }
     body.kbd-landscape #left-keys, body.kbd-landscape #right-keys {
         display: flex; top: calc(var(--safe-top) + var(--toolbar-h)); bottom: var(--safe-bottom);
@@ -632,7 +684,7 @@ responsive_css = '''
         .small-key { width: 90%; height: 90%; min-height: 25px; }
     }
     @media (max-width: 480px) and (orientation: landscape) {
-        :root { --side-key-w: 140px; }
+        :root { --side-key-w: 152px; }
     }
 </style>
 '''
