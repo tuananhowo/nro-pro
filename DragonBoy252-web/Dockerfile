@@ -2,8 +2,16 @@ FROM eclipse-temurin:17-jdk-jammy AS build
 RUN apt-get update && apt-get install -y --no-install-recommends curl unzip python3 && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
 RUN curl --fail --location https://codeload.github.com/zb3/freej2me-web/zip/c19416e75cbc15f9a27f7e967ee81cb108761e30 -o source.zip && unzip -q source.zip && mv freej2me-web-* upstream && rm source.zip
-COPY DragonBoy252.jar prepare_jar.py NetworkBridge.java SocketConnectionImpl.java HttpConnectionImpl.java network.js patch.py ./
-RUN python3 patch.py upstream && mkdir classes && javac --release 8 -encoding UTF-8 -cp upstream/web/freej2me-web.jar -d classes NetworkBridge.java SocketConnectionImpl.java HttpConnectionImpl.java upstream/src/javax/microedition/io/Connector.java upstream/src/javax/microedition/io/InputConnection.java upstream/src/javax/microedition/io/OutputConnection.java upstream/src/org/recompile/mobile/Mobile.java upstream/src/javax/microedition/lcdui/TextBox.java && jar uf upstream/web/freej2me-web.jar -C classes .
+COPY DragonBoy252.jar prepare_jar.py NetworkBridge.java SocketConnectionImpl.java HttpConnectionImpl.java network.js patch.py PatchGameBytecode.java ./
+RUN python3 patch.py upstream \
+    && mkdir -p classes patcher patched \
+    && javac --add-exports java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED -d patcher PatchGameBytecode.java \
+    && (cd patched && jar xf ../DragonBoy252.jar cw.class ap.class) \
+    && java --add-exports java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED -cp patcher PatchGameBytecode patched/cw.class DragonBoy252.jar upstream/web/freej2me-web.jar \
+    && java --add-exports java.base/jdk.internal.org.objectweb.asm=ALL-UNNAMED -cp patcher PatchGameBytecode patched/ap.class DragonBoy252.jar upstream/web/freej2me-web.jar \
+    && jar uf DragonBoy252.jar -C patched cw.class ap.class \
+    && javac --release 8 -encoding UTF-8 -cp upstream/web/freej2me-web.jar -d classes NetworkBridge.java SocketConnectionImpl.java HttpConnectionImpl.java upstream/src/javax/microedition/io/Connector.java upstream/src/javax/microedition/io/InputConnection.java upstream/src/javax/microedition/io/OutputConnection.java upstream/src/org/recompile/mobile/Mobile.java upstream/src/javax/microedition/lcdui/TextBox.java \
+    && jar uf upstream/web/freej2me-web.jar -C classes .
 RUN mkdir -p upstream/web/source && cp *.java *.js *.py upstream/web/source/ && cp upstream/src/javax/microedition/io/Connector.java upstream/src/javax/microedition/io/InputConnection.java upstream/src/javax/microedition/io/OutputConnection.java upstream/web/source/ && cp upstream/LICENSE upstream/web/source/LICENSE
 RUN python3 prepare_jar.py DragonBoy252.jar upstream/web/DragonBoy252.jar
 FROM node:22-bookworm-slim

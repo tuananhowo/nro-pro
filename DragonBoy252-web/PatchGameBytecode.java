@@ -18,6 +18,12 @@ public final class PatchGameBytecode {
             throw new IllegalArgumentException("Expected class file, game JAR, and emulator JAR");
         }
         Path classFile = Paths.get(args[0]);
+        String targetClass = classFile.getFileName().toString();
+        boolean patchGameScreen = "cw.class".equals(targetClass);
+        boolean patchChatAvatar = "ap.class".equals(targetClass);
+        if (!patchGameScreen && !patchChatAvatar) {
+            throw new IllegalArgumentException("Expected cw.class or ap.class, got " + targetClass);
+        }
         URL[] classPath = new URL[] {
             Paths.get(args[1]).toUri().toURL(),
             Paths.get(args[2]).toUri().toURL()
@@ -48,11 +54,17 @@ public final class PatchGameBytecode {
                 @Override
                 public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
                     MethodVisitor method = super.visitMethod(access, name, descriptor, signature, exceptions);
-                    if (method == null || !"a".equals(name) || !"(Leh;)V".equals(descriptor)) return method;
+                    boolean targetMethod = patchGameScreen
+                        ? "a".equals(name) && "(Leh;)V".equals(descriptor)
+                        : "a".equals(name) && "(Leh;III)V".equals(descriptor);
+                    if (method == null || !targetMethod) return method;
                     return new MethodVisitor(Opcodes.ASM7, method) {
                         @Override
                         public void visitMethodInsn(int opcode, String owner, String methodName, String methodDescriptor, boolean isInterface) {
-                            if (!isGuardedRenderCall(owner, methodName, methodDescriptor)) {
+                            boolean guardedCall = patchGameScreen
+                                ? isGuardedRenderCall(owner, methodName, methodDescriptor)
+                                : isChatAvatarCall(owner, methodName, methodDescriptor);
+                            if (!guardedCall) {
                                 super.visitMethodInsn(opcode, owner, methodName, methodDescriptor, isInterface);
                                 return;
                             }
@@ -74,10 +86,14 @@ public final class PatchGameBytecode {
                 }
             };
             reader.accept(visitor, ClassReader.EXPAND_FRAMES);
-            if (patchedCalls[0] == 0) throw new IllegalStateException("No render call sites were found");
+            if (patchedCalls[0] == 0) throw new IllegalStateException("No guarded render call sites were found in " + targetClass);
             Files.write(classFile, writer.toByteArray());
-            System.out.println("Patched map entity and effect draw call sites: " + patchedCalls[0]);
+            System.out.println("Patched " + patchedCalls[0] + " render call site(s) in " + targetClass);
         }
+    }
+
+    private static boolean isChatAvatarCall(String owner, String name, String descriptor) {
+        return "co".equals(owner) && "a".equals(name) && "(Leh;III)V".equals(descriptor);
     }
 
     private static boolean isGuardedRenderCall(String owner, String name, String descriptor) {
