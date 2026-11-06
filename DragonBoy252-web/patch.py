@@ -179,6 +179,55 @@ async function main() {''', 1)
     document.getElementById("loading").textContent = "Không tải được giả lập: " + (error && error.message ? error.message : String(error));
 });''')
     else:
+        ensure_installed = '''async function ensureAppInstalled(lib, appId) {
+    const launcherUtil = await lib.pl.zb3.freej2me.launcher.LauncherUtil;
+    const appFile = await cjFileBlob(appId + "/app.jar");
+
+    if (!appFile) {
+        await launcherUtil.installFromBundle(cheerpjWebRoot + "/apps/", appId);
+        if (appId === "DragonBoy252") {
+            try {
+                const versionResponse = await fetch("/DragonBoy252.jar", {method: "HEAD", cache: "no-store"});
+                const jarEtag = versionResponse.ok ? versionResponse.headers.get("etag") : null;
+                if (jarEtag) localStorage.setItem("dragonboy252.jarEtag", jarEtag);
+            } catch {}
+        }
+        return;
+    }
+
+    if (appId !== "DragonBoy252") return;
+
+    let latestJarEtag = null;
+    try {
+        const versionResponse = await fetch("/DragonBoy252.jar", {method: "HEAD", cache: "no-store"});
+        if (versionResponse.ok) latestJarEtag = versionResponse.headers.get("etag");
+    } catch {}
+    let installedJarEtag = null;
+    try { installedJarEtag = localStorage.getItem("dragonboy252.jarEtag"); } catch {}
+    if (!latestJarEtag || latestJarEtag === installedJarEtag) return;
+
+    try {
+        const updateResponse = await fetch("/DragonBoy252.jar", {cache: "no-store"});
+        if (!updateResponse.ok) throw new Error("Could not download the latest game JAR");
+        const jarBuffer = await updateResponse.arrayBuffer();
+        const File = await lib.java.io.File;
+        const installedJar = await new File("/files/" + appId + "/app.jar");
+        await launcherUtil.copyJar(new Int8Array(jarBuffer), installedJar);
+        localStorage.setItem("dragonboy252.jarEtag", latestJarEtag);
+    } catch (error) {
+        console.warn("Could not update the installed game JAR; opening the saved copy.", error);
+    }
+}'''
+        text = text.replace('''async function ensureAppInstalled(lib, appId) {
+    const appFile = await cjFileBlob(appId + "/app.jar");
+
+    if (!appFile) {
+        const launcherUtil = await lib.pl.zb3.freej2me.launcher.LauncherUtil;
+
+        await launcherUtil.installFromBundle(cheerpjWebRoot + "/apps/", appId);
+    }
+}''', ensure_installed)
+        assert 'const installedJar = await new File("/files/" + appId + "/app.jar");' in text
         text = text.replace('function setListeners() {', '''function pointerPosition(point) {
     const bounds = display.getBoundingClientRect();
     return {
